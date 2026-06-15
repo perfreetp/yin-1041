@@ -14,6 +14,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Calendar as CalendarIcon,
+  X,
 } from 'lucide-react';
 import {
   LineChart,
@@ -43,52 +44,127 @@ const Statistics = () => {
   const { patients, assessments, progressData, trendData, groups, checkins, appointments, prescriptions, currentDoctor } = useAppStore();
   const [selectedPatient, setSelectedPatient] = useState('all');
   const [dateRange, setDateRange] = useState('30');
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportType, setExportType] = useState<'individual' | 'monthly' | 'stage'>('individual');
+  const [exportPatientId, setExportPatientId] = useState('');
+  const [exportMonth, setExportMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`);
+  const [exportStage, setExportStage] = useState('早期');
+
+  const filteredPatients = selectedPatient === 'all' ? patients.filter((p) => p.status === 'active') : patients.filter((p) => p.id === selectedPatient);
+  const filteredCheckins = selectedPatient === 'all' ? checkins : checkins.filter((c) => c.patientId === selectedPatient);
+  const filteredAssessments = selectedPatient === 'all' ? assessments : assessments.filter((a) => a.patientId === selectedPatient);
+  const filteredPrescriptions = selectedPatient === 'all' ? prescriptions : prescriptions.filter((pr) => pr.patientId === selectedPatient);
+
+  const activePatients = selectedPatient === 'all' ? patients.filter((p) => p.status === 'active').length : filteredPatients.length;
+  const totalAssessments = filteredAssessments.length;
+  const avgCheckinRate = filteredCheckins.length > 0 ? Math.round((filteredCheckins.filter((c) => c.status === 'approved').length / filteredCheckins.length) * 100) : 0;
+  const avgRecoveryScore = filteredAssessments.filter((a) => a.maxScore > 0).length > 0
+    ? Math.round(filteredAssessments.filter((a) => a.maxScore > 0).reduce((s, a) => s + (a.totalScore / a.maxScore) * 100, 0) / filteredAssessments.filter((a) => a.maxScore > 0).length)
+    : 0;
+
+  const assessmentTypeToCategory: Record<string, string> = {
+    'Fugl-Meyer 评分': 'Fugl-Meyer',
+    'Fugl-Meyer': 'Fugl-Meyer',
+    '膝关节ROM': '膝关节ROM',
+    '关节活动度评估': '膝关节ROM',
+    'Barthel指数': 'Barthel指数',
+    'Barthel 指数': 'Barthel指数',
+  };
 
   const buildChartData = () => {
-    let source = progressData;
     if (selectedPatient !== 'all') {
-      const pAssessments = assessments.filter((a) => a.patientId === selectedPatient && a.maxScore > 0);
-      if (pAssessments.length > 0) {
-        source = pAssessments.map((a) => ({
-          date: a.date.slice(5),
-          score: Math.round((a.totalScore / a.maxScore) * 100),
-          category: a.typeName,
-        }));
-      } else {
-        source = progressData.filter((d) => {
-          if (selectedPatient === 'all') return true;
-          return false;
-        });
+      const pAssessments = filteredAssessments.filter((a) => a.maxScore > 0 && assessmentTypeToCategory[a.typeName]);
+      if (pAssessments.length === 0) {
+        return { data: [], hasData: { fugl: false, rom: false, barthel: false } };
       }
+
+      const dateMap: Record<string, Record<string, number>> = {};
+      pAssessments.forEach((a) => {
+        const cat = assessmentTypeToCategory[a.typeName];
+        if (!dateMap[a.date]) dateMap[a.date] = {};
+        dateMap[a.date][cat] = Math.round((a.totalScore / a.maxScore) * 100);
+      });
+
+      const dates = Object.keys(dateMap).sort();
+      const data = dates.map((date) => ({
+        date: date.slice(5),
+        'Fugl-Meyer': dateMap[date]['Fugl-Meyer'] ?? null,
+        '膝关节ROM': dateMap[date]['膝关节ROM'] ?? null,
+        'Barthel指数': dateMap[date]['Barthel指数'] ?? null,
+      }));
+
+      const hasData = {
+        fugl: data.some((d) => d['Fugl-Meyer'] !== null),
+        rom: data.some((d) => d['膝关节ROM'] !== null),
+        barthel: data.some((d) => d['Barthel指数'] !== null),
+      };
+      return { data, hasData };
     }
 
     const dateMap: Record<string, Record<string, number>> = {};
-    source.forEach((point) => {
+    progressData.forEach((point) => {
       if (!dateMap[point.date]) dateMap[point.date] = {};
       dateMap[point.date][point.category] = point.score;
     });
 
     const dates = Object.keys(dateMap).sort();
-    return dates.map((date) => ({
+    const data = dates.map((date) => ({
       date,
-      'Fugl-Meyer': dateMap[date]['Fugl-Meyer'] ?? undefined,
-      '膝关节ROM': dateMap[date]['膝关节ROM'] ?? undefined,
-      'Barthel指数': dateMap[date]['Barthel指数'] ?? undefined,
+      'Fugl-Meyer': dateMap[date]['Fugl-Meyer'] ?? null,
+      '膝关节ROM': dateMap[date]['膝关节ROM'] ?? null,
+      'Barthel指数': dateMap[date]['Barthel指数'] ?? null,
     }));
+
+    return {
+      data,
+      hasData: {
+        fugl: data.some((d) => d['Fugl-Meyer'] !== null),
+        rom: data.some((d) => d['膝关节ROM'] !== null),
+        barthel: data.some((d) => d['Barthel指数'] !== null),
+      },
+    };
   };
 
-  const chartData = buildChartData();
-  const totalAssessments = assessments.length;
-  const avgCheckinRate = 86.5;
-  const avgRecoveryScore = 72;
+  const { data: chartData, hasData: chartHasData } = buildChartData();
 
-  const diagnosisDistribution = [
-    { name: '膝关节术后', value: 12, color: '#165DFF' },
-    { name: '脑卒中', value: 8, color: '#0E7368' },
-    { name: '肩袖损伤', value: 6, color: '#FF7D00' },
-    { name: '脊柱康复', value: 10, color: '#722ED1' },
-    { name: '其他', value: 5, color: '#86909C' },
-  ];
+  const weekCheckinData = selectedPatient === 'all'
+    ? [
+        { day: '周一', 打卡数: 28, 异常数: 2 },
+        { day: '周二', 打卡数: 32, 异常数: 1 },
+        { day: '周三', 打卡数: 25, 异常数: 3 },
+        { day: '周四', 打卡数: 30, 异常数: 2 },
+        { day: '周五', 打卡数: 35, 异常数: 1 },
+        { day: '周六', 打卡数: 22, 异常数: 4 },
+        { day: '周日', 打卡数: 18, 异常数: 2 },
+      ]
+    : (() => {
+        const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+        const today = new Date();
+        const weekdayOffset = (today.getDay() + 6) % 7;
+        const weekDates = days.map((_, i) => {
+          const d = new Date(today);
+          d.setDate(d.getDate() - weekdayOffset + i);
+          return d.toISOString().split('T')[0];
+        });
+        return days.map((day, i) => ({
+          day,
+          打卡数: filteredCheckins.filter((c) => c.date === weekDates[i]).length,
+          异常数: filteredCheckins.filter((c) => c.date === weekDates[i] && c.status !== 'approved').length,
+        }));
+      })();
+
+  const diagnosisDistribution = selectedPatient === 'all'
+    ? [
+        { name: '膝关节术后', value: 12, color: '#165DFF' },
+        { name: '脑卒中', value: 8, color: '#0E7368' },
+        { name: '肩袖损伤', value: 6, color: '#FF7D00' },
+        { name: '脊柱康复', value: 10, color: '#722ED1' },
+        { name: '其他', value: 5, color: '#86909C' },
+      ]
+    : (() => {
+        const patient = filteredPatients[0];
+        return [{ name: patient?.diagnosis || '暂无诊断', value: 1, color: '#165DFF' }];
+      })();
 
   const stageDistribution = [
     { stage: '早期', count: 10 },
@@ -112,25 +188,31 @@ const Statistics = () => {
     打卡完成率: 70 + Math.floor(Math.random() * 25),
   }));
 
-  const weekCheckinData = [
-    { day: '周一', 打卡数: 28, 异常数: 2 },
-    { day: '周二', 打卡数: 32, 异常数: 1 },
-    { day: '周三', 打卡数: 25, 异常数: 3 },
-    { day: '周四', 打卡数: 30, 异常数: 2 },
-    { day: '周五', 打卡数: 35, 异常数: 1 },
-    { day: '周六', 打卡数: 22, 异常数: 4 },
-    { day: '周日', 打卡数: 18, 异常数: 2 },
-  ];
+  const openExportModal = (type: 'individual' | 'monthly' | 'stage') => {
+    setExportType(type);
+    if (type === 'individual' && selectedPatient !== 'all') {
+      setExportPatientId(selectedPatient);
+    } else {
+      setExportPatientId('');
+    }
+    setShowExportModal(true);
+  };
 
-  const generateReport = (type: 'individual' | 'monthly' | 'stage') => {
+  const generateReport = (type: 'individual' | 'monthly' | 'stage', options?: { patientId?: string; month?: string; stage?: string }) => {
     const now = new Date().toLocaleString('zh-CN', { hour12: false });
     const separator = '='.repeat(60);
     const divider = '-'.repeat(60);
     let content = '';
+    let targetPatients: typeof patients = [];
 
     if (type === 'individual') {
-      content = `患者个人康复报告\n生成时间: ${now}\n生成医生: ${currentDoctor.name}\n${separator}\n\n`;
-      patients.filter((p) => p.status === 'active').forEach((patient) => {
+      const patientId = options?.patientId;
+      targetPatients = patientId ? patients.filter((p) => p.id === patientId) : patients.filter((p) => p.status === 'active');
+      const targetPatient = targetPatients[0];
+      const targetName = targetPatient ? targetPatient.name : '全部患者';
+
+      content = `患者个人康复报告\n患者: ${targetName}\n生成时间: ${now}\n生成医生: ${currentDoctor.name}\n${separator}\n\n`;
+      targetPatients.forEach((patient) => {
         content += `【患者基本信息】\n`;
         content += `  姓名: ${patient.name}\n`;
         content += `  年龄: ${patient.age}岁  性别: ${patient.gender}\n`;
@@ -167,81 +249,108 @@ const Statistics = () => {
         content += `\n${divider}\n\n`;
       });
     } else if (type === 'monthly') {
-      content = `科室康复统计月报\n生成时间: ${now}\n科室: ${currentDoctor.department}\n${separator}\n\n`;
+      const month = options?.month || exportMonth;
+      const [year, m] = month.split('-');
+      const monthStart = `${year}-${m}-01`;
+      const nextMonth = parseInt(m) + 1;
+      const nextMonthStr = String(nextMonth > 12 ? 1 : nextMonth).padStart(2, '0');
+      const nextYear = nextMonth > 12 ? parseInt(year) + 1 : year;
+      const monthEnd = `${nextYear}-${nextMonthStr}-01`;
+
+      const monthPatients = patients.filter((p) => {
+        const pCheckins = checkins.filter((c) => c.patientId === p.id && c.date >= monthStart && c.date < monthEnd);
+        const pAssessments = assessments.filter((a) => a.patientId === p.id && a.date >= monthStart && a.date < monthEnd);
+        return pCheckins.length > 0 || pAssessments.length > 0 || p.status === 'active';
+      });
+      const monthCheckins = checkins.filter((c) => c.date >= monthStart && c.date < monthEnd);
+      const monthAssessments = assessments.filter((a) => a.date >= monthStart && a.date < monthEnd);
+      const monthPrescriptions = prescriptions.filter((p) => p.startDate >= monthStart && p.startDate < monthEnd);
+      const monthAppointments = appointments.filter((a) => a.date >= monthStart && a.date < monthEnd);
+
+      content = `科室康复统计月报\n统计月份: ${year}年${parseInt(m)}月\n生成时间: ${now}\n科室: ${currentDoctor.department}\n${separator}\n\n`;
       content += `【总体概况】\n`;
-      content += `  在管患者数: ${patients.filter((p) => p.status === 'active').length}\n`;
-      content += `  已出院患者数: ${patients.filter((p) => p.status === 'discharged').length}\n`;
-      content += `  评估总次数: ${assessments.length}\n`;
-      content += `  打卡总次数: ${checkins.length}\n`;
-      content += `  处方总数: ${prescriptions.length}\n`;
-      content += `  预约总数: ${appointments.length}\n\n`;
+      content += `  在管患者数: ${monthPatients.length}\n`;
+      content += `  评估总次数: ${monthAssessments.length}\n`;
+      content += `  打卡总次数: ${monthCheckins.length}\n`;
+      content += `  处方总数: ${monthPrescriptions.length}\n`;
+      content += `  预约总数: ${monthAppointments.length}\n\n`;
       content += `【分组统计】\n`;
       groups.forEach((g) => {
-        const cnt = patients.filter((p) => p.groupId === g.id).length;
+        const cnt = monthPatients.filter((p) => p.groupId === g.id).length;
         content += `  ${g.name}: ${cnt}人\n`;
       });
       content += `\n【诊断分布】\n`;
       const diagMap: Record<string, number> = {};
-      patients.forEach((p) => { diagMap[p.diagnosis] = (diagMap[p.diagnosis] || 0) + 1; });
+      monthPatients.forEach((p) => { diagMap[p.diagnosis] = (diagMap[p.diagnosis] || 0) + 1; });
       Object.entries(diagMap).forEach(([d, c]) => { content += `  ${d}: ${c}人\n`; });
       content += `\n【风险分级】\n`;
-      content += `  低风险: ${patients.filter((p) => p.riskLevel === 'low').length}人\n`;
-      content += `  中风险: ${patients.filter((p) => p.riskLevel === 'medium').length}人\n`;
-      content += `  高风险: ${patients.filter((p) => p.riskLevel === 'high').length}人\n\n`;
+      content += `  低风险: ${monthPatients.filter((p) => p.riskLevel === 'low').length}人\n`;
+      content += `  中风险: ${monthPatients.filter((p) => p.riskLevel === 'medium').length}人\n`;
+      content += `  高风险: ${monthPatients.filter((p) => p.riskLevel === 'high').length}人\n\n`;
       content += `【预约统计】\n`;
-      content += `  待确认: ${appointments.filter((a) => a.status === 'pending').length}\n`;
-      content += `  已确认: ${appointments.filter((a) => a.status === 'confirmed').length}\n`;
-      content += `  已完成: ${appointments.filter((a) => a.status === 'completed').length}\n`;
-      content += `  已取消: ${appointments.filter((a) => a.status === 'cancelled').length}\n\n`;
+      content += `  待确认: ${monthAppointments.filter((a) => a.status === 'pending').length}\n`;
+      content += `  已确认: ${monthAppointments.filter((a) => a.status === 'confirmed').length}\n`;
+      content += `  已完成: ${monthAppointments.filter((a) => a.status === 'completed').length}\n`;
+      content += `  已取消: ${monthAppointments.filter((a) => a.status === 'cancelled').length}\n\n`;
       content += `【评估统计】\n`;
       const typeMap: Record<string, number> = {};
-      assessments.forEach((a) => { typeMap[a.typeName] = (typeMap[a.typeName] || 0) + 1; });
+      monthAssessments.forEach((a) => { typeMap[a.typeName] = (typeMap[a.typeName] || 0) + 1; });
       Object.entries(typeMap).forEach(([t, c]) => { content += `  ${t}: ${c}次\n`; });
-      if (assessments.length > 0) {
-        const scored = assessments.filter((a) => a.maxScore > 0);
+      if (monthAssessments.length > 0) {
+        const scored = monthAssessments.filter((a) => a.maxScore > 0);
         if (scored.length > 0) {
           const avgRecovery = Math.round(scored.reduce((s, a) => s + (a.totalScore / a.maxScore) * 100, 0) / scored.length);
           content += `  平均恢复度: ${avgRecovery}%\n`;
         }
       }
     } else {
-      const stages = ['早期', '中期', '后期', '维持期'];
-      content = `阶段康复总结报告\n生成时间: ${now}\n生成医生: ${currentDoctor.name}\n${separator}\n\n`;
-      stages.forEach((stage) => {
-        const sp = patients.filter((p) => p.stage === stage);
-        content += `【${stage}康复阶段】\n`;
-        content += `  患者数: ${sp.length}\n`;
-        if (sp.length > 0) {
-          content += `  患者: ${sp.map((p) => p.name).join('、')}\n`;
-          const sa = assessments.filter((a) => sp.some((p) => p.id === a.patientId));
-          if (sa.length > 0) {
-            const scored = sa.filter((a) => a.maxScore > 0);
-            if (scored.length > 0) {
-              const avg = Math.round(scored.reduce((s, a) => s + (a.totalScore / a.maxScore) * 100, 0) / scored.length);
-              content += `  平均恢复度: ${avg}%\n`;
-            }
-            content += `  评估次数: ${sa.length}\n`;
+      const stage = options?.stage || exportStage;
+      const sp = patients.filter((p) => p.stage === stage);
+
+      content = `阶段康复总结报告\n康复阶段: ${stage}\n生成时间: ${now}\n生成医生: ${currentDoctor.name}\n${separator}\n\n`;
+      content += `【${stage}康复阶段】\n`;
+      content += `  患者数: ${sp.length}\n`;
+      if (sp.length > 0) {
+        content += `  患者: ${sp.map((p) => p.name).join('、')}\n`;
+        const sa = assessments.filter((a) => sp.some((p) => p.id === a.patientId));
+        if (sa.length > 0) {
+          const scored = sa.filter((a) => a.maxScore > 0);
+          if (scored.length > 0) {
+            const avg = Math.round(scored.reduce((s, a) => s + (a.totalScore / a.maxScore) * 100, 0) / scored.length);
+            content += `  平均恢复度: ${avg}%\n`;
           }
-          const sc = checkins.filter((c) => sp.some((p) => p.id === c.patientId));
-          content += `  打卡次数: ${sc.length}\n`;
-          const approved = sc.filter((c) => c.status === 'approved').length;
-          if (sc.length > 0) content += `  审核通过率: ${Math.round((approved / sc.length) * 100)}%\n`;
-          const highRisk = sp.filter((p) => p.riskLevel === 'high').length;
-          if (highRisk > 0) content += `  高风险患者: ${highRisk}人\n`;
+          content += `  评估次数: ${sa.length}\n`;
         }
-        content += `\n`;
-      });
+        const sc = checkins.filter((c) => sp.some((p) => p.id === c.patientId));
+        content += `  打卡次数: ${sc.length}\n`;
+        const approved = sc.filter((c) => c.status === 'approved').length;
+        if (sc.length > 0) content += `  审核通过率: ${Math.round((approved / sc.length) * 100)}%\n`;
+        const highRisk = sp.filter((p) => p.riskLevel === 'high').length;
+        if (highRisk > 0) content += `  高风险患者: ${highRisk}人\n`;
+      }
     }
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    let filename = '';
+    if (type === 'individual') {
+      const name = options?.patientId && targetPatients[0] ? targetPatients[0].name : '全部';
+      filename = `患者个人康复报告_${name}.txt`;
+    } else if (type === 'monthly') {
+      const m = options?.month || exportMonth;
+      filename = `科室康复统计月报_${m}.txt`;
+    } else {
+      const s = options?.stage || exportStage;
+      filename = `阶段康复总结报告_${s}.txt`;
+    }
     a.href = url;
-    a.download = type === 'individual' ? '患者个人康复报告.txt' : type === 'monthly' ? '科室康复统计月报.txt' : '阶段康复总结报告.txt';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    setShowExportModal(false);
   };
 
   return (
@@ -267,7 +376,7 @@ const Statistics = () => {
               </button>
             ))}
           </div>
-          <button className="btn-primary flex items-center" onClick={() => generateReport('monthly')}>
+          <button className="btn-primary flex items-center" onClick={() => openExportModal('monthly')}>
             <FileDown className="w-4 h-4 mr-1.5" />
             导出康复报告
           </button>
@@ -358,39 +467,47 @@ const Statistics = () => {
             </select>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorFugl" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#165DFF" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#165DFF" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorRom" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0E7368" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#0E7368" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorBarthel" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#FF7D00" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#FF7D00" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F0F2F5" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#86909C' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 12, fill: '#86909C' }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#fff',
-                    border: 'none',
-                    borderRadius: '12px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="Fugl-Meyer" stroke="#165DFF" fill="url(#colorFugl)" strokeWidth={2.5} />
-                <Area type="monotone" dataKey="膝关节ROM" stroke="#0E7368" fill="url(#colorRom)" strokeWidth={2.5} />
-                <Area type="monotone" dataKey="Barthel指数" stroke="#FF7D00" fill="url(#colorBarthel)" strokeWidth={2.5} />
-              </AreaChart>
-            </ResponsiveContainer>
+            {chartData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <Activity className="w-10 h-10 text-neutral-200 mb-2" />
+                <p className="text-sm text-neutral-300">暂无评估数据</p>
+                <p className="text-xs text-neutral-200 mt-1">完成评估后可查看康复趋势</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id="colorFugl" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#165DFF" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#165DFF" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorRom" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0E7368" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#0E7368" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorBarthel" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#FF7D00" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#FF7D00" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F0F2F5" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#86909C' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: '#86909C' }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: 'none',
+                      borderRadius: '12px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    }}
+                  />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                  {chartHasData.fugl && <Area type="monotone" dataKey="Fugl-Meyer" stroke="#165DFF" fill="url(#colorFugl)" strokeWidth={2.5} connectNulls />}
+                  {chartHasData.rom && <Area type="monotone" dataKey="膝关节ROM" stroke="#0E7368" fill="url(#colorRom)" strokeWidth={2.5} connectNulls />}
+                  {chartHasData.barthel && <Area type="monotone" dataKey="Barthel指数" stroke="#FF7D00" fill="url(#colorBarthel)" strokeWidth={2.5} connectNulls />}
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -602,7 +719,7 @@ const Statistics = () => {
               <div
                 key={index}
                 className="border border-neutral-100 rounded-xl p-5 hover:shadow-card-hover transition-all cursor-pointer group"
-                onClick={() => generateReport(report.type)}
+                onClick={() => openExportModal(report.type)}
               >
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${report.color} flex items-center justify-center text-white mb-4`}>
                   <Icon className="w-6 h-6" />
@@ -621,6 +738,81 @@ const Statistics = () => {
           })}
         </div>
       </div>
+
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center animate-fadeIn">
+          <div className="bg-white rounded-2xl w-[480px] max-w-[90vw] shadow-2xl animate-slideUp">
+            <div className="flex items-center justify-between p-5 border-b border-neutral-100">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-500">
+                  {exportType === 'individual' ? '导出个人康复报告' : exportType === 'monthly' ? '导出科室康复月报' : '导出阶段总结报告'}
+                </h3>
+                <p className="text-xs text-neutral-300 mt-0.5">请选择报告参数</p>
+              </div>
+              <button className="p-1.5 hover:bg-neutral-100 rounded-lg" onClick={() => setShowExportModal(false)}>
+                <X className="w-4 h-4 text-neutral-300" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {exportType === 'individual' && (
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-2">选择患者</label>
+                  <select
+                    value={exportPatientId}
+                    onChange={(e) => setExportPatientId(e.target.value)}
+                    className="input-field w-full"
+                  >
+                    <option value="">全部患者</option>
+                    {patients.filter((p) => p.status === 'active').map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {exportType === 'monthly' && (
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-2">选择月份</label>
+                  <input
+                    type="month"
+                    value={exportMonth}
+                    onChange={(e) => setExportMonth(e.target.value)}
+                    className="input-field w-full"
+                  />
+                </div>
+              )}
+              {exportType === 'stage' && (
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-2">选择康复阶段</label>
+                  <select
+                    value={exportStage}
+                    onChange={(e) => setExportStage(e.target.value)}
+                    className="input-field w-full"
+                  >
+                    {['早期', '中期', '后期', '维持期'].map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end space-x-3 p-5 border-t border-neutral-100">
+              <button className="btn-secondary" onClick={() => setShowExportModal(false)}>取消</button>
+              <button
+                className="btn-primary"
+                disabled={exportType === 'individual' && !exportPatientId ? false : false}
+                onClick={() => generateReport(exportType, {
+                  patientId: exportPatientId || undefined,
+                  month: exportMonth,
+                  stage: exportStage,
+                })}
+              >
+                <Download className="w-4 h-4 mr-1.5 inline" />
+                生成并下载
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

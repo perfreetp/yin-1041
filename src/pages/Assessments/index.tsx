@@ -108,6 +108,10 @@ const Assessments = () => {
       totalScore = parseInt(manualScore) || 0;
       maxScore = parseInt(manualMaxScore) || 100;
       scores['日常生活能力'] = totalScore;
+    } else if (newAssessmentType === 'stage_summary') {
+      totalScore = parseInt(manualScore) || 0;
+      maxScore = parseInt(manualMaxScore) || 100;
+      scores['阶段综合评分'] = totalScore;
     }
 
     addAssessment({
@@ -534,7 +538,7 @@ const Assessments = () => {
                 </div>
               )}
 
-              {(newAssessmentType === 'berg' || newAssessmentType === 'barthel') && (
+              {(newAssessmentType === 'berg' || newAssessmentType === 'barthel' || newAssessmentType === 'stage_summary') && (
                 <div className="mb-6">
                   <h3 className="section-title">{assessmentTypeInfo[newAssessmentType].name}</h3>
                   <div className="space-y-3">
@@ -545,15 +549,27 @@ const Assessments = () => {
                           满分 {newAssessmentType === 'berg' ? '56' : '100'} 分
                         </p>
                       </div>
-                      <input
-                        type="number"
-                        min={0}
-                        max={newAssessmentType === 'berg' ? 56 : 100}
-                        value={manualScore}
-                        onChange={(e) => setManualScore(e.target.value)}
-                        className="input-field !w-24 text-center"
-                        placeholder="0"
-                      />
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={newAssessmentType === 'berg' ? 56 : 100}
+                          value={manualMaxScore}
+                          onChange={(e) => setManualMaxScore(e.target.value)}
+                          className="input-field !w-20 text-center text-xs"
+                          placeholder="满分"
+                        />
+                        <span className="text-neutral-300">/</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={newAssessmentType === 'berg' ? 56 : 100}
+                          value={manualScore}
+                          onChange={(e) => setManualScore(e.target.value)}
+                          className="input-field !w-24 text-center"
+                          placeholder="0"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

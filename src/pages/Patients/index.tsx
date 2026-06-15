@@ -19,6 +19,8 @@ import {
   Key,
   Download,
   Edit,
+  X,
+  Save,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import type { Patient, RiskLevel, PatientStage, PatientStatus } from '@/types';
@@ -231,8 +233,11 @@ const PatientList = () => {
 const PatientDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { patients, groups, prescriptions, checkins, assessments } = useAppStore();
+  const { patients, groups, prescriptions, checkins, assessments, addAssessment, currentDoctor } = useAppStore();
   const [activeTab, setActiveTab] = useState<'info' | 'prescription' | 'checkins' | 'assessments' | 'family'>('info');
+  const [showStageSummaryModal, setShowStageSummaryModal] = useState(false);
+  const [stageSummaryScore, setStageSummaryScore] = useState('');
+  const [stageSummaryAdvice, setStageSummaryAdvice] = useState('');
 
   const patient = patients.find((p) => p.id === id);
   if (!patient) {
@@ -243,6 +248,50 @@ const PatientDetail = () => {
   const patientCheckins = checkins.filter((c) => c.patientId === id);
   const patientAssessments = assessments.filter((a) => a.patientId === id);
   const group = groups.find((g) => g.id === patient.groupId);
+
+  const recentPrescriptions = patientPrescriptions.slice(0, 3);
+  const recentCheckins = patientCheckins.slice(0, 5);
+  const recentAssessments = patientAssessments.slice(0, 3);
+  const approvedCheckins = patientCheckins.filter((c) => c.status === 'approved').length;
+  const checkinRate = patientCheckins.length > 0 ? Math.round((approvedCheckins / patientCheckins.length) * 100) : 0;
+
+  const handleSaveStageSummary = () => {
+    const totalScore = parseInt(stageSummaryScore) || 0;
+    const maxScore = 100;
+
+    const prescriptionSummary = recentPrescriptions.length > 0
+      ? recentPrescriptions.map((p) => `  • ${p.name} (${p.startDate}~${p.endDate}) - ${p.status === 'active' ? '进行中' : p.status === 'completed' ? '已完成' : '已暂停'}`).join('\n')
+      : '  暂无训练处方';
+
+    const checkinSummary = patientCheckins.length > 0
+      ? `  共${patientCheckins.length}次打卡，审核通过率${checkinRate}%，连续打卡${patient.checkinStreak}天`
+      : '  暂无打卡记录';
+
+    const assessmentSummary = recentAssessments.length > 0
+      ? recentAssessments.map((a) => {
+          const percent = a.maxScore > 0 ? ` (${Math.round((a.totalScore / a.maxScore) * 100)}%)` : '';
+          return `  • ${a.date} ${a.typeName}: ${a.totalScore}/${a.maxScore}${percent}`;
+        }).join('\n')
+      : '  暂无评估记录';
+
+    const summaryText = `【${patient.stage}阶段康复总结】\n\n处方执行情况:\n${prescriptionSummary}\n\n打卡情况:\n${checkinSummary}\n\n评估进展:\n${assessmentSummary}\n\n医生建议:\n${stageSummaryAdvice || '  暂无建议'}`;
+
+    addAssessment({
+      patientId: id!,
+      patientName: patient.name,
+      type: 'stage_summary',
+      typeName: '康复阶段总结',
+      date: new Date().toISOString().split('T')[0],
+      scores: { '阶段综合评分': totalScore },
+      totalScore,
+      maxScore,
+      summary: summaryText,
+    });
+
+    setShowStageSummaryModal(false);
+    setStageSummaryScore('');
+    setStageSummaryAdvice('');
+  };
 
   const tabs = [
     { key: 'info', label: '基本信息', icon: FileText },
@@ -486,7 +535,11 @@ const PatientDetail = () => {
 
           {activeTab === 'assessments' && (
             <div className="space-y-3">
-              <div className="flex justify-end">
+              <div className="flex justify-end space-x-3">
+                <button className="btn-secondary" onClick={() => setShowStageSummaryModal(true)}>
+                  <FileText className="w-4 h-4 mr-1.5 inline" />
+                  阶段总结
+                </button>
                 <button className="btn-primary">
                   <UserCheck className="w-4 h-4 mr-1.5 inline" />
                   发起评估
@@ -596,6 +649,135 @@ const PatientDetail = () => {
           )}
         </div>
       </div>
+
+      {showStageSummaryModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center animate-fadeIn">
+          <div className="bg-white rounded-2xl w-[600px] max-w-[90vw] max-h-[85vh] overflow-y-auto shadow-2xl animate-slideUp">
+            <div className="flex items-center justify-between p-5 border-b border-neutral-100 sticky top-0 bg-white z-10">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-500">{patient.stage}阶段康复总结</h3>
+                <p className="text-xs text-neutral-300 mt-0.5">自动汇总近期数据，添加医生建议</p>
+              </div>
+              <button className="p-1.5 hover:bg-neutral-100 rounded-lg" onClick={() => setShowStageSummaryModal(false)}>
+                <X className="w-4 h-4 text-neutral-300" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5">
+              <div className="bg-primary-50/50 rounded-xl p-4">
+                <h4 className="text-sm font-semibold text-primary-600 mb-2 flex items-center">
+                  <ClipboardList className="w-4 h-4 mr-1.5" />
+                  近期处方执行
+                </h4>
+                {recentPrescriptions.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {recentPrescriptions.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-sm">
+                        <span className="text-neutral-500">{p.name}</span>
+                        <span className={`text-xs ${p.status === 'active' ? 'text-medical-success' : p.status === 'completed' ? 'text-medical-teal' : 'text-neutral-300'}`}>
+                          {p.status === 'active' ? '进行中' : p.status === 'completed' ? '已完成' : '已暂停'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-neutral-300">暂无训练处方</p>
+                )}
+              </div>
+
+              <div className="bg-medical-teal/5 rounded-xl p-4">
+                <h4 className="text-sm font-semibold text-medical-teal mb-2 flex items-center">
+                  <CheckSquare className="w-4 h-4 mr-1.5" />
+                  打卡情况
+                </h4>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-white rounded-lg p-2.5 text-center">
+                    <p className="text-xs text-neutral-300">总打卡</p>
+                    <p className="text-lg font-bold text-neutral-500 mt-0.5">{patientCheckins.length}</p>
+                  </div>
+                  <div className="bg-white rounded-lg p-2.5 text-center">
+                    <p className="text-xs text-neutral-300">通过率</p>
+                    <p className="text-lg font-bold text-medical-success mt-0.5">{checkinRate}%</p>
+                  </div>
+                  <div className="bg-white rounded-lg p-2.5 text-center">
+                    <p className="text-xs text-neutral-300">连续打卡</p>
+                    <p className="text-lg font-bold text-primary-500 mt-0.5">{patient.checkinStreak}天</p>
+                  </div>
+                </div>
+                {recentCheckins.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {recentCheckins.slice(0, 3).map((c) => (
+                      <div key={c.id} className="flex items-center justify-between text-xs">
+                        <span className="text-neutral-300">{c.date} {c.time}</span>
+                        <span className={c.status === 'approved' ? 'text-medical-success' : c.status === 'pending' ? 'text-medical-warning' : 'text-medical-danger'}>
+                          {c.status === 'approved' ? '已通过' : c.status === 'pending' ? '待审核' : '已驳回'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-purple-50/50 rounded-xl p-4">
+                <h4 className="text-sm font-semibold text-purple-600 mb-2 flex items-center">
+                  <Activity className="w-4 h-4 mr-1.5" />
+                  评估进展
+                </h4>
+                {recentAssessments.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {recentAssessments.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between text-sm">
+                        <span className="text-neutral-500">{a.date} {a.typeName}</span>
+                        <span className="font-medium text-neutral-500">
+                          {a.totalScore}/{a.maxScore}
+                          {a.maxScore > 0 && <span className="text-xs text-neutral-300 ml-1">({Math.round((a.totalScore / a.maxScore) * 100)}%)</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-neutral-300">暂无评估记录</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-neutral-500 mb-2">阶段综合评分</label>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={stageSummaryScore}
+                    onChange={(e) => setStageSummaryScore(e.target.value)}
+                    className="input-field !w-32"
+                    placeholder="0-100"
+                  />
+                  <span className="text-sm text-neutral-300">/ 100 分</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-neutral-500 mb-2">医生建议</label>
+                <textarea
+                  value={stageSummaryAdvice}
+                  onChange={(e) => setStageSummaryAdvice(e.target.value)}
+                  rows={4}
+                  className="input-field w-full resize-none"
+                  placeholder="请输入此阶段的康复建议、注意事项和下一阶段目标..."
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3 p-5 border-t border-neutral-100 sticky bottom-0 bg-white">
+              <button className="btn-secondary" onClick={() => setShowStageSummaryModal(false)}>取消</button>
+              <button className="btn-primary" onClick={handleSaveStageSummary}>
+                <Save className="w-4 h-4 mr-1.5 inline" />
+                保存总结
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
