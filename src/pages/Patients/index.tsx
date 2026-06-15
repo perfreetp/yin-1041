@@ -238,6 +238,7 @@ const PatientDetail = () => {
   const [showStageSummaryModal, setShowStageSummaryModal] = useState(false);
   const [stageSummaryScore, setStageSummaryScore] = useState('');
   const [stageSummaryAdvice, setStageSummaryAdvice] = useState('');
+  const [assessmentFilter, setAssessmentFilter] = useState<'all' | 'stage_summary'>('all');
 
   const patient = patients.find((p) => p.id === id);
   if (!patient) {
@@ -535,17 +536,43 @@ const PatientDetail = () => {
 
           {activeTab === 'assessments' && (
             <div className="space-y-3">
-              <div className="flex justify-end space-x-3">
-                <button className="btn-secondary" onClick={() => setShowStageSummaryModal(true)}>
-                  <FileText className="w-4 h-4 mr-1.5 inline" />
-                  阶段总结
-                </button>
-                <button className="btn-primary">
-                  <UserCheck className="w-4 h-4 mr-1.5 inline" />
-                  发起评估
-                </button>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-1 bg-neutral-50 rounded-lg p-0.5">
+                  <button
+                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                      assessmentFilter === 'all'
+                        ? 'bg-white text-neutral-500 shadow-sm'
+                        : 'text-neutral-300 hover:text-neutral-500'
+                    }`}
+                    onClick={() => setAssessmentFilter('all')}
+                  >
+                    全部评估
+                  </button>
+                  <button
+                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                      assessmentFilter === 'stage_summary'
+                        ? 'bg-white text-neutral-500 shadow-sm'
+                        : 'text-neutral-300 hover:text-neutral-500'
+                    }`}
+                    onClick={() => setAssessmentFilter('stage_summary')}
+                  >
+                    阶段总结
+                  </button>
+                </div>
+                <div className="flex space-x-3">
+                  <button className="btn-secondary" onClick={() => setShowStageSummaryModal(true)}>
+                    <FileText className="w-4 h-4 mr-1.5 inline" />
+                    阶段总结
+                  </button>
+                  <button className="btn-primary">
+                    <UserCheck className="w-4 h-4 mr-1.5 inline" />
+                    发起评估
+                  </button>
+                </div>
               </div>
-              {patientAssessments.map((assessment) => (
+              {patientAssessments
+                .filter((a) => assessmentFilter === 'all' || a.type === 'stage_summary')
+                .map((assessment) => (
                 <div key={assessment.id} className="border border-neutral-100 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>

@@ -49,6 +49,7 @@ const Statistics = () => {
   const [exportPatientId, setExportPatientId] = useState('');
   const [exportMonth, setExportMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`);
   const [exportStage, setExportStage] = useState('早期');
+  const [exportPreviewMode, setExportPreviewMode] = useState(false);
 
   const filteredPatients = selectedPatient === 'all' ? patients.filter((p) => p.status === 'active') : patients.filter((p) => p.id === selectedPatient);
   const filteredCheckins = selectedPatient === 'all' ? checkins : checkins.filter((c) => c.patientId === selectedPatient);
@@ -73,16 +74,46 @@ const Statistics = () => {
 
   const buildChartData = () => {
     if (selectedPatient !== 'all') {
-      const pAssessments = filteredAssessments.filter((a) => a.maxScore > 0 && assessmentTypeToCategory[a.typeName]);
-      if (pAssessments.length === 0) {
+      const validAssessments: { date: string; category: string; score: number }[] = [];
+
+      filteredAssessments.forEach((a) => {
+        const cat = assessmentTypeToCategory[a.typeName];
+        if (cat && a.maxScore > 0) {
+          validAssessments.push({
+            date: a.date,
+            category: cat,
+            score: Math.round((a.totalScore / a.maxScore) * 100),
+          });
+        } else if (a.type === 'rom' && a.romData && a.romData.length > 0) {
+          const avgRom = a.romData.reduce((sum, r) => {
+            const normalMatch = r.normalRange.match(/\d+-\d+/);
+            if (normalMatch) {
+              const [_, maxStr] = normalMatch[0].split('-');
+              const max = parseFloat(maxStr);
+              if (max > 0) {
+                return sum + Math.max(r.activeRange, r.passiveRange) / max * 100;
+              }
+            }
+            return sum;
+          }, 0) / a.romData.filter((r) => r.normalRange.includes('-')).length;
+          if (!isNaN(avgRom) && avgRom > 0) {
+            validAssessments.push({
+              date: a.date,
+              category: '膝关节ROM',
+              score: Math.round(Math.min(avgRom, 100)),
+            });
+          }
+        }
+      });
+
+      if (validAssessments.length === 0) {
         return { data: [], hasData: { fugl: false, rom: false, barthel: false } };
       }
 
       const dateMap: Record<string, Record<string, number>> = {};
-      pAssessments.forEach((a) => {
-        const cat = assessmentTypeToCategory[a.typeName];
-        if (!dateMap[a.date]) dateMap[a.date] = {};
-        dateMap[a.date][cat] = Math.round((a.totalScore / a.maxScore) * 100);
+      validAssessments.forEach((p) => {
+        if (!dateMap[p.date]) dateMap[p.date] = {};
+        dateMap[p.date][p.category] = p.score;
       });
 
       const dates = Object.keys(dateMap).sort();
@@ -153,6 +184,59 @@ const Statistics = () => {
         }));
       })();
 
+  const getDaysSince = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    return Math.floor((today.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  const followupGroups = (() => {
+    if (selectedPatient !== 'all') {
+      const p = filteredPatients[0];
+      if (!p) return { key: [], normal: [], review: [] };
+      const lastCheckin = filteredCheckins.length > 0 ? filteredCheckins[0].date : p.joinDate;
+      const lastAssessment = filteredAssessments.length > 0 ? filteredAssessments[0].date : p.joinDate;
+      const daysSinceCheckin = getDaysSince(lastCheckin);
+      const daysSinceAssessment = getDaysSince(lastAssessment);
+      const isKey = p.riskLevel === 'high' || daysSinceCheckin > 3 || daysSinceAssessment > 14;
+      const isReview = !isKey && daysSinceAssessment > 10;
+      return {
+        key: isKey ? [p] : [],
+        normal: !isKey && !isReview ? [p] : [],
+        review: isReview ? [p] : [],
+      };
+    }
+
+    const keyPatients: typeof patients = [];
+    const normalPatients: typeof patients = [];
+    const reviewPatients: typeof patients = [];
+
+    filteredPatients.forEach((p) => {
+      const pCheckins = checkins.filter((c) => c.patientId === p.id);
+      const pAssessments = assessments.filter((a) => a.patientId === p.id);
+      const lastCheckin = pCheckins.length > 0 ? pCheckins[0].date : p.joinDate;
+      const lastAssessment = pAssessments.length > 0 ? pAssessments[0].date : p.joinDate;
+      const daysSinceCheckin = getDaysSince(lastCheckin);
+      const daysSinceAssessment = getDaysSince(lastAssessment);
+
+      if (p.riskLevel === 'high' || daysSinceCheckin > 3 || daysSinceAssessment > 14) {
+        keyPatients.push(p);
+      } else if (daysSinceAssessment > 10) {
+        reviewPatients.push(p);
+      } else {
+        normalPatients.push(p);
+      }
+    });
+
+    return {
+      key: keyPatients,
+      normal: normalPatients,
+      review: reviewPatients,
+    };
+  })();
+
+  const [expandedFollowup, setExpandedFollowup] = useState<string | null>(null);
+
   const diagnosisDistribution = selectedPatient === 'all'
     ? [
         { name: '膝关节术后', value: 12, color: '#165DFF' },
@@ -195,6 +279,7 @@ const Statistics = () => {
     } else {
       setExportPatientId('');
     }
+    setExportPreviewMode(false);
     setShowExportModal(true);
   };
 
@@ -683,6 +768,94 @@ const Statistics = () => {
       <div className="card">
         <div className="flex items-center justify-between mb-5">
           <h3 className="section-title mb-0 flex items-center">
+            <Users className="w-4 h-4 mr-2 text-primary-500" />
+            患者随访看板
+          </h3>
+          <p className="text-xs text-neutral-300">按风险、打卡、评估自动分类，重点关注需跟进患者</p>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            {
+              key: 'key',
+              title: '重点跟进',
+              desc: '高风险/未打卡>3天/超14天未评估',
+              count: followupGroups.key.length,
+              color: 'from-red-500 to-red-700',
+              bg: 'bg-red-50',
+              text: 'text-red-600',
+              patients: followupGroups.key,
+            },
+            {
+              key: 'normal',
+              title: '正常康复',
+              desc: '风险可控，打卡评估规律',
+              count: followupGroups.normal.length,
+              color: 'from-green-500 to-green-700',
+              bg: 'bg-green-50',
+              text: 'text-green-600',
+              patients: followupGroups.normal,
+            },
+            {
+              key: 'review',
+              title: '待复评',
+              desc: '超10天未评估，建议安排复评',
+              count: followupGroups.review.length,
+              color: 'from-orange-500 to-orange-700',
+              bg: 'bg-orange-50',
+              text: 'text-orange-600',
+              patients: followupGroups.review,
+            },
+          ].map((group) => (
+            <div key={group.key} className={`border border-neutral-100 rounded-xl overflow-hidden ${expandedFollowup === group.key ? 'ring-2 ring-primary-500' : ''}`}>
+              <div
+                className={`p-4 cursor-pointer transition-all hover:bg-neutral-50`}
+                onClick={() => setExpandedFollowup(expandedFollowup === group.key ? null : group.key)}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className={`text-sm font-semibold ${group.text}`}>{group.title}</h4>
+                    <p className="text-xs text-neutral-300 mt-1">{group.desc}</p>
+                  </div>
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${group.color} flex items-center justify-center text-white text-lg font-bold`}>
+                    {group.count}
+                  </div>
+                </div>
+              </div>
+              {expandedFollowup === group.key && group.patients.length > 0 && (
+                <div className="border-t border-neutral-100 max-h-64 overflow-y-auto">
+                  {group.patients.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-neutral-50 border-b border-neutral-50 last:border-0">
+                      <div className="flex items-center">
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-xs font-medium">
+                          {p.name.charAt(0)}
+                        </div>
+                        <div className="ml-2.5">
+                          <p className="text-sm font-medium text-neutral-500">{p.name}</p>
+                          <p className="text-xs text-neutral-300">{p.diagnosis} · {p.stage}</p>
+                        </div>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        p.riskLevel === 'high' ? 'bg-red-100 text-red-600' : p.riskLevel === 'medium' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'
+                      }`}>
+                        {p.riskLevel === 'high' ? '高风险' : p.riskLevel === 'medium' ? '中风险' : '低风险'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {expandedFollowup === group.key && group.patients.length === 0 && (
+                <div className="border-t border-neutral-100 p-6 text-center">
+                  <p className="text-sm text-neutral-300">暂无患者</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="section-title mb-0 flex items-center">
             <FileDown className="w-4 h-4 mr-2 text-primary-500" />
             康复报告导出
           </h3>
@@ -741,75 +914,383 @@ const Statistics = () => {
 
       {showExportModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center animate-fadeIn">
-          <div className="bg-white rounded-2xl w-[480px] max-w-[90vw] shadow-2xl animate-slideUp">
-            <div className="flex items-center justify-between p-5 border-b border-neutral-100">
+          <div className={`bg-white rounded-2xl ${exportPreviewMode ? 'w-[720px]' : 'w-[480px]'} max-w-[90vw] max-h-[85vh] shadow-2xl flex flex-col animate-slideUp`}>
+            <div className="flex items-center justify-between p-5 border-b border-neutral-100 flex-shrink-0">
               <div>
                 <h3 className="text-base font-semibold text-neutral-500">
-                  {exportType === 'individual' ? '导出个人康复报告' : exportType === 'monthly' ? '导出科室康复月报' : '导出阶段总结报告'}
+                  {exportType === 'individual' ? '患者个人康复报告' : exportType === 'monthly' ? '科室康复统计月报' : '阶段康复总结报告'}
                 </h3>
-                <p className="text-xs text-neutral-300 mt-0.5">请选择报告参数</p>
+                <p className="text-xs text-neutral-300 mt-0.5">
+                  {exportPreviewMode ? '预览报告内容，确认无误后下载' : '请选择报告参数'}
+                </p>
               </div>
               <button className="p-1.5 hover:bg-neutral-100 rounded-lg" onClick={() => setShowExportModal(false)}>
                 <X className="w-4 h-4 text-neutral-300" />
               </button>
             </div>
-            <div className="p-5 space-y-4">
-              {exportType === 'individual' && (
-                <div>
-                  <label className="block text-sm font-medium text-neutral-500 mb-2">选择患者</label>
-                  <select
-                    value={exportPatientId}
-                    onChange={(e) => setExportPatientId(e.target.value)}
-                    className="input-field w-full"
+
+            {!exportPreviewMode ? (
+              <>
+                <div className="p-5 space-y-4 flex-shrink-0">
+                  {exportType === 'individual' && (
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-500 mb-2">选择患者</label>
+                      <select
+                        value={exportPatientId}
+                        onChange={(e) => setExportPatientId(e.target.value)}
+                        className="input-field w-full"
+                      >
+                        <option value="">全部患者</option>
+                        {patients.filter((p) => p.status === 'active').map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {exportType === 'monthly' && (
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-500 mb-2">选择月份</label>
+                      <input
+                        type="month"
+                        value={exportMonth}
+                        onChange={(e) => setExportMonth(e.target.value)}
+                        className="input-field w-full"
+                      />
+                    </div>
+                  )}
+                  {exportType === 'stage' && (
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-500 mb-2">选择康复阶段</label>
+                      <select
+                        value={exportStage}
+                        onChange={(e) => setExportStage(e.target.value)}
+                        className="input-field w-full"
+                      >
+                        {['早期', '中期', '后期', '维持期'].map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-end space-x-3 p-5 border-t border-neutral-100 flex-shrink-0">
+                  <button className="btn-secondary" onClick={() => setShowExportModal(false)}>取消</button>
+                  <button
+                    className="btn-primary"
+                    onClick={() => setExportPreviewMode(true)}
                   >
-                    <option value="">全部患者</option>
-                    {patients.filter((p) => p.status === 'active').map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+                    <FileText className="w-4 h-4 mr-1.5 inline" />
+                    预览报告
+                  </button>
                 </div>
-              )}
-              {exportType === 'monthly' && (
-                <div>
-                  <label className="block text-sm font-medium text-neutral-500 mb-2">选择月份</label>
-                  <input
-                    type="month"
-                    value={exportMonth}
-                    onChange={(e) => setExportMonth(e.target.value)}
-                    className="input-field w-full"
-                  />
+              </>
+            ) : (
+              <>
+                <div className="flex-1 overflow-y-auto p-5">
+                  <div className="bg-neutral-50 rounded-xl p-4 mb-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-semibold text-neutral-500">
+                          {exportType === 'individual' && (exportPatientId ? patients.find((p) => p.id === exportPatientId)?.name : '全部患者')}
+                          {exportType === 'monthly' && `${exportMonth.split('-')[0]}年${parseInt(exportMonth.split('-')[1])}月`}
+                          {exportType === 'stage' && `${exportStage}康复阶段`}
+                        </h4>
+                        <p className="text-xs text-neutral-300 mt-0.5">生成医生: {currentDoctor.name} · 康复科</p>
+                      </div>
+                      <span className="tag tag-success">已生成</span>
+                    </div>
+                  </div>
+
+                  {exportType === 'individual' && (() => {
+                    const p = exportPatientId ? patients.find((pt) => pt.id === exportPatientId) : null;
+                    const targetPatients = p ? [p] : patients.filter((pt) => pt.status === 'active');
+                    const targetAssessments = p ? assessments.filter((a) => a.patientId === p.id) : assessments;
+                    const targetCheckins = p ? checkins.filter((c) => c.patientId === p.id) : checkins;
+                    const targetPrescriptions = p ? prescriptions.filter((pr) => pr.patientId === p.id) : prescriptions;
+                    const stageSummaries = targetAssessments.filter((a) => a.type === 'stage_summary');
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                          <div className="bg-primary-50 px-4 py-2.5 border-b border-primary-100">
+                            <h5 className="text-sm font-semibold text-primary-600">基本信息</h5>
+                          </div>
+                          <div className="p-4 grid grid-cols-2 gap-3">
+                            {p ? (
+                              <>
+                                <div>
+                                  <p className="text-xs text-neutral-300">姓名</p>
+                                  <p className="text-sm text-neutral-500 mt-0.5">{p.name}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-neutral-300">诊断</p>
+                                  <p className="text-sm text-neutral-500 mt-0.5">{p.diagnosis}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-neutral-300">康复阶段</p>
+                                  <p className="text-sm text-neutral-500 mt-0.5">{p.stage}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-neutral-300">风险等级</p>
+                                  <p className="text-sm text-neutral-500 mt-0.5">
+                                    {p.riskLevel === 'high' ? '高风险' : p.riskLevel === 'medium' ? '中风险' : '低风险'}
+                                  </p>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div>
+                                  <p className="text-xs text-neutral-300">在管患者</p>
+                                  <p className="text-sm text-neutral-500 mt-0.5">{targetPatients.length} 人</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-neutral-300">评估总数</p>
+                                  <p className="text-sm text-neutral-500 mt-0.5">{targetAssessments.length} 次</p>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                          <div className="bg-medical-teal/10 px-4 py-2.5 border-b border-medical-teal/20">
+                            <h5 className="text-sm font-semibold text-medical-teal">评估记录 <span className="font-normal text-xs text-neutral-300 ml-2">共 {targetAssessments.length} 次</span></h5>
+                          </div>
+                          <div className="p-2 max-h-48 overflow-y-auto">
+                            {targetAssessments.length > 0 ? targetAssessments.slice(0, 8).map((a) => (
+                              <div key={a.id} className="flex items-center justify-between px-2 py-2 hover:bg-neutral-50 rounded-lg">
+                                <div>
+                                  <p className="text-sm text-neutral-500">{a.typeName}</p>
+                                  <p className="text-xs text-neutral-300">{a.date}</p>
+                                </div>
+                                {a.maxScore > 0 && (
+                                  <span className="text-sm font-medium text-primary-500">
+                                    {a.totalScore}/{a.maxScore}
+                                  </span>
+                                )}
+                              </div>
+                            )) : (
+                              <p className="text-sm text-neutral-300 text-center py-4">暂无评估记录</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                          <div className="bg-green-50 px-4 py-2.5 border-b border-green-100">
+                            <h5 className="text-sm font-semibold text-green-600">打卡记录 <span className="font-normal text-xs text-neutral-300 ml-2">共 {targetCheckins.length} 次</span></h5>
+                          </div>
+                          <div className="p-4">
+                            <div className="grid grid-cols-3 gap-3">
+                              <div className="bg-neutral-50 rounded-lg p-2.5 text-center">
+                                <p className="text-xs text-neutral-300">总打卡</p>
+                                <p className="text-lg font-bold text-neutral-500 mt-0.5">{targetCheckins.length}</p>
+                              </div>
+                              <div className="bg-neutral-50 rounded-lg p-2.5 text-center">
+                                <p className="text-xs text-neutral-300">已通过</p>
+                                <p className="text-lg font-bold text-green-500 mt-0.5">{targetCheckins.filter((c) => c.status === 'approved').length}</p>
+                              </div>
+                              <div className="bg-neutral-50 rounded-lg p-2.5 text-center">
+                                <p className="text-xs text-neutral-300">待审核</p>
+                                <p className="text-lg font-bold text-orange-500 mt-0.5">{targetCheckins.filter((c) => c.status === 'pending').length}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                          <div className="bg-purple-50 px-4 py-2.5 border-b border-purple-100">
+                            <h5 className="text-sm font-semibold text-purple-600">训练处方 <span className="font-normal text-xs text-neutral-300 ml-2">共 {targetPrescriptions.length} 条</span></h5>
+                          </div>
+                          <div className="p-2">
+                            {targetPrescriptions.length > 0 ? targetPrescriptions.map((pr) => (
+                              <div key={pr.id} className="flex items-center justify-between px-2 py-2 hover:bg-neutral-50 rounded-lg">
+                                <div>
+                                  <p className="text-sm text-neutral-500">{pr.name}</p>
+                                  <p className="text-xs text-neutral-300">{pr.startDate} ~ {pr.endDate}</p>
+                                </div>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  pr.status === 'active' ? 'bg-green-100 text-green-600' : pr.status === 'completed' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {pr.status === 'active' ? '进行中' : pr.status === 'completed' ? '已完成' : '已暂停'}
+                                </span>
+                              </div>
+                            )) : (
+                              <p className="text-sm text-neutral-300 text-center py-4">暂无处方</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {stageSummaries.length > 0 && (
+                          <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                            <div className="bg-orange-50 px-4 py-2.5 border-b border-orange-100">
+                              <h5 className="text-sm font-semibold text-orange-600">阶段总结 <span className="font-normal text-xs text-neutral-300 ml-2">共 {stageSummaries.length} 份</span></h5>
+                            </div>
+                            <div className="p-3 space-y-2">
+                              {stageSummaries.map((s) => (
+                                <div key={s.id} className="bg-white border border-neutral-100 rounded-lg p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="text-xs font-medium text-neutral-500">{s.date} · 阶段综合评分 {s.totalScore}/{s.maxScore}</p>
+                                  </div>
+                                  <p className="text-xs text-neutral-400 whitespace-pre-line leading-relaxed">{s.summary}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {exportType === 'monthly' && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-primary-50 rounded-xl p-4 text-center">
+                          <p className="text-xs text-primary-400">在管患者</p>
+                          <p className="text-2xl font-bold text-primary-600 mt-1">
+                            {patients.filter((p) => p.status === 'active').length}
+                          </p>
+                        </div>
+                        <div className="bg-green-50 rounded-xl p-4 text-center">
+                          <p className="text-xs text-green-500">评估次数</p>
+                          <p className="text-2xl font-bold text-green-600 mt-1">{assessments.length}</p>
+                        </div>
+                        <div className="bg-orange-50 rounded-xl p-4 text-center">
+                          <p className="text-xs text-orange-500">打卡总数</p>
+                          <p className="text-2xl font-bold text-orange-600 mt-1">{checkins.length}</p>
+                        </div>
+                      </div>
+
+                      <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                        <div className="bg-neutral-50 px-4 py-2.5 border-b border-neutral-100">
+                          <h5 className="text-sm font-semibold text-neutral-500">分组统计</h5>
+                        </div>
+                        <div className="p-3 space-y-1.5">
+                          {groups.map((g) => {
+                            const cnt = patients.filter((p) => p.groupId === g.id).length;
+                            return (
+                              <div key={g.id} className="flex items-center justify-between text-sm">
+                                <span className="text-neutral-500">{g.name}</span>
+                                <span className="font-medium text-neutral-500">{cnt} 人</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                        <div className="bg-neutral-50 px-4 py-2.5 border-b border-neutral-100">
+                          <h5 className="text-sm font-semibold text-neutral-500">风险分级</h5>
+                        </div>
+                        <div className="p-3 flex items-center justify-around">
+                          <div className="text-center">
+                            <p className="text-lg font-bold text-green-500">{patients.filter((p) => p.riskLevel === 'low').length}</p>
+                            <p className="text-xs text-neutral-300">低风险</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-lg font-bold text-orange-500">{patients.filter((p) => p.riskLevel === 'medium').length}</p>
+                            <p className="text-xs text-neutral-300">中风险</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-lg font-bold text-red-500">{patients.filter((p) => p.riskLevel === 'high').length}</p>
+                            <p className="text-xs text-neutral-300">高风险</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {exportType === 'stage' && (() => {
+                    const sp = patients.filter((p) => p.stage === exportStage);
+                    const sa = assessments.filter((a) => sp.some((p) => p.id === a.patientId));
+                    const sc = checkins.filter((c) => sp.some((p) => p.id === c.patientId));
+                    const stageSummaries = sa.filter((a) => a.type === 'stage_summary');
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="bg-primary-50 rounded-xl p-4 text-center">
+                            <p className="text-xs text-primary-400">患者数</p>
+                            <p className="text-2xl font-bold text-primary-600 mt-1">{sp.length}</p>
+                          </div>
+                          <div className="bg-green-50 rounded-xl p-4 text-center">
+                            <p className="text-xs text-green-500">评估次数</p>
+                            <p className="text-2xl font-bold text-green-600 mt-1">{sa.length}</p>
+                          </div>
+                          <div className="bg-orange-50 rounded-xl p-4 text-center">
+                            <p className="text-xs text-orange-500">打卡次数</p>
+                            <p className="text-2xl font-bold text-orange-600 mt-1">{sc.length}</p>
+                          </div>
+                        </div>
+
+                        <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                          <div className="bg-neutral-50 px-4 py-2.5 border-b border-neutral-100">
+                            <h5 className="text-sm font-semibold text-neutral-500">阶段患者名单</h5>
+                          </div>
+                          <div className="p-2 max-h-40 overflow-y-auto">
+                            {sp.length > 0 ? sp.map((patient) => (
+                              <div key={patient.id} className="flex items-center justify-between px-2 py-2 hover:bg-neutral-50 rounded-lg">
+                                <div className="flex items-center">
+                                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-xs">
+                                    {patient.name.charAt(0)}
+                                  </div>
+                                  <span className="ml-2 text-sm text-neutral-500">{patient.name}</span>
+                                </div>
+                                <span className="text-xs text-neutral-300">{patient.diagnosis}</span>
+                              </div>
+                            )) : (
+                              <p className="text-sm text-neutral-300 text-center py-4">暂无患者</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {stageSummaries.length > 0 && (
+                          <div className="border border-neutral-100 rounded-xl overflow-hidden">
+                            <div className="bg-orange-50 px-4 py-2.5 border-b border-orange-100">
+                              <h5 className="text-sm font-semibold text-orange-600">阶段总结记录</h5>
+                            </div>
+                            <div className="p-3 space-y-2 max-h-48 overflow-y-auto">
+                              {stageSummaries.map((s) => {
+                                const patient = patients.find((p) => p.id === s.patientId);
+                                return (
+                                  <div key={s.id} className="bg-white border border-neutral-100 rounded-lg p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <p className="text-xs font-medium text-neutral-500">
+                                        {patient?.name || ''} · {s.date}
+                                      </p>
+                                      <span className="text-xs text-orange-600 font-medium">{s.totalScore}/{s.maxScore}分</span>
+                                    </div>
+                                    <p className="text-xs text-neutral-400 whitespace-pre-line leading-relaxed">{s.summary}</p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
-              )}
-              {exportType === 'stage' && (
-                <div>
-                  <label className="block text-sm font-medium text-neutral-500 mb-2">选择康复阶段</label>
-                  <select
-                    value={exportStage}
-                    onChange={(e) => setExportStage(e.target.value)}
-                    className="input-field w-full"
-                  >
-                    {['早期', '中期', '后期', '维持期'].map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                <div className="flex items-center justify-between p-5 border-t border-neutral-100 flex-shrink-0">
+                  <button className="btn-secondary" onClick={() => setExportPreviewMode(false)}>
+                    ← 返回修改
+                  </button>
+                  <div className="flex items-center space-x-3">
+                    <button className="btn-secondary" onClick={() => setShowExportModal(false)}>关闭</button>
+                    <button
+                      className="btn-primary"
+                      onClick={() => generateReport(exportType, {
+                        patientId: exportPatientId || undefined,
+                        month: exportMonth,
+                        stage: exportStage,
+                      })}
+                    >
+                      <Download className="w-4 h-4 mr-1.5 inline" />
+                      下载报告
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
-            <div className="flex items-center justify-end space-x-3 p-5 border-t border-neutral-100">
-              <button className="btn-secondary" onClick={() => setShowExportModal(false)}>取消</button>
-              <button
-                className="btn-primary"
-                disabled={exportType === 'individual' && !exportPatientId ? false : false}
-                onClick={() => generateReport(exportType, {
-                  patientId: exportPatientId || undefined,
-                  month: exportMonth,
-                  stage: exportStage,
-                })}
-              >
-                <Download className="w-4 h-4 mr-1.5 inline" />
-                生成并下载
-              </button>
-            </div>
+              </>
+            )}
           </div>
         </div>
       )}
