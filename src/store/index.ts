@@ -30,6 +30,40 @@ import {
   mockProgressData,
 } from '@/mock/data';
 
+function loadPersistedData() {
+  try {
+    const raw = localStorage.getItem('rehab-store-persist');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        prescriptions: parsed.prescriptions ?? mockPrescriptions,
+        exercises: parsed.exercises ?? mockExercises,
+        assessments: parsed.assessments ?? mockAssessments,
+        appointments: parsed.appointments ?? mockAppointments,
+      };
+    }
+  } catch {}
+  return {
+    prescriptions: mockPrescriptions,
+    exercises: mockExercises,
+    assessments: mockAssessments,
+    appointments: mockAppointments,
+  };
+}
+
+function persistData(state: Pick<AppState, 'prescriptions' | 'exercises' | 'assessments' | 'appointments'>) {
+  try {
+    localStorage.setItem('rehab-store-persist', JSON.stringify({
+      prescriptions: state.prescriptions,
+      exercises: state.exercises,
+      assessments: state.assessments,
+      appointments: state.appointments,
+    }));
+  } catch {}
+}
+
+const persisted = loadPersistedData();
+
 interface AppState {
   currentDoctor: Doctor;
   patients: Patient[];
@@ -63,12 +97,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   patients: mockPatients,
   selectedPatient: null,
   groups: mockGroups,
-  prescriptions: mockPrescriptions,
-  exercises: mockExercises,
+  prescriptions: persisted.prescriptions,
+  exercises: persisted.exercises,
   checkins: mockCheckins,
-  assessments: mockAssessments,
+  assessments: persisted.assessments,
   messages: mockMessages,
-  appointments: mockAppointments,
+  appointments: persisted.appointments,
   notifications: mockNotifications,
   trendData: mockTrendData,
   progressData: mockProgressData,
@@ -132,7 +166,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       id: `ap-${Date.now()}`,
       createdAt: new Date().toISOString().split('T')[0],
     };
-    set({ appointments: [...state.appointments, newAppointment] });
+    const updated = [...state.appointments, newAppointment];
+    set({ appointments: updated });
+    persistData(get());
   },
 
   updateAppointmentStatus: (appointmentId, status) => {
@@ -142,6 +178,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         a.id === appointmentId ? { ...a, status } : a
       ),
     });
+    persistData(get());
   },
 
   addPrescription: (prescription) => {
@@ -153,6 +190,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       doctorName: state.currentDoctor.name,
     };
     set({ prescriptions: [newPrescription, ...state.prescriptions] });
+    persistData(get());
   },
 
   addAssessment: (assessment) => {
@@ -163,6 +201,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       doctorName: state.currentDoctor.name,
     };
     set({ assessments: [newAssessment, ...state.assessments] });
+    persistData(get());
   },
 
   addExercise: (exercise) => {
@@ -172,5 +211,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       id: `ex-${Date.now()}`,
     };
     set({ exercises: [...state.exercises, newExercise] });
+    persistData(get());
   },
 }));

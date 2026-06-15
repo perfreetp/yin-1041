@@ -514,11 +514,24 @@ const PatientDetail = () => {
                     <div className="grid grid-cols-2 gap-2 mb-3">
                       {assessment.romData.map((rom, i) => (
                         <div key={i} className="bg-neutral-50 rounded-lg p-2.5">
-                          <p className="text-xs text-neutral-300">{rom.joint} ({rom.side})</p>
-                          <p className="text-sm font-medium text-neutral-500 mt-0.5">
-                            主动 {rom.activeRange}{rom.unit} · 被动 {rom.passiveRange}{rom.unit}
-                          </p>
-                          <p className="text-xs text-neutral-300">正常值: {rom.normalRange}{rom.unit}</p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs text-neutral-300">{rom.joint} ({rom.side})</p>
+                            <p className="text-xs text-neutral-300">正常值: {rom.normalRange}</p>
+                          </div>
+                          <div className="flex items-center space-x-4 mt-1.5">
+                            <div>
+                              <p className="text-xs text-neutral-300">主动</p>
+                              <p className="text-sm font-semibold text-primary-500">
+                                {rom.activeRange}{rom.unit}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-neutral-300">被动</p>
+                              <p className="text-sm font-semibold text-medical-teal">
+                                {rom.passiveRange}{rom.unit}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>

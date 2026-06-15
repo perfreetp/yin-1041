@@ -44,7 +44,40 @@ const Statistics = () => {
   const [selectedPatient, setSelectedPatient] = useState('all');
   const [dateRange, setDateRange] = useState('30');
 
-  const activePatients = patients.filter((p) => p.status === 'active').length;
+  const buildChartData = () => {
+    let source = progressData;
+    if (selectedPatient !== 'all') {
+      const pAssessments = assessments.filter((a) => a.patientId === selectedPatient && a.maxScore > 0);
+      if (pAssessments.length > 0) {
+        source = pAssessments.map((a) => ({
+          date: a.date.slice(5),
+          score: Math.round((a.totalScore / a.maxScore) * 100),
+          category: a.typeName,
+        }));
+      } else {
+        source = progressData.filter((d) => {
+          if (selectedPatient === 'all') return true;
+          return false;
+        });
+      }
+    }
+
+    const dateMap: Record<string, Record<string, number>> = {};
+    source.forEach((point) => {
+      if (!dateMap[point.date]) dateMap[point.date] = {};
+      dateMap[point.date][point.category] = point.score;
+    });
+
+    const dates = Object.keys(dateMap).sort();
+    return dates.map((date) => ({
+      date,
+      'Fugl-Meyer': dateMap[date]['Fugl-Meyer'] ?? undefined,
+      '膝关节ROM': dateMap[date]['膝关节ROM'] ?? undefined,
+      'Barthel指数': dateMap[date]['Barthel指数'] ?? undefined,
+    }));
+  };
+
+  const chartData = buildChartData();
   const totalAssessments = assessments.length;
   const avgCheckinRate = 86.5;
   const avgRecoveryScore = 72;
@@ -234,7 +267,7 @@ const Statistics = () => {
               </button>
             ))}
           </div>
-          <button className="btn-primary flex items-center">
+          <button className="btn-primary flex items-center" onClick={() => generateReport('monthly')}>
             <FileDown className="w-4 h-4 mr-1.5" />
             导出康复报告
           </button>
@@ -317,7 +350,7 @@ const Statistics = () => {
               className="h-8 px-3 text-sm border border-neutral-200 rounded-lg focus:outline-none"
             >
               <option value="all">全部患者平均</option>
-              {patients.slice(0, 5).map((p) => (
+              {patients.filter((p) => p.status === 'active').map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
@@ -326,7 +359,7 @@ const Statistics = () => {
           </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={progressData}>
+              <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="colorFugl" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#165DFF" stopOpacity={0.25} />
