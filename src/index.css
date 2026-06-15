@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #1D2129;
+  background-color: #F5F7FA;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #C9CDD4;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #86909C;
+}
+
+/* Custom utility classes */
+@layer components {
+  .btn-primary {
+    @apply bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-lg transition-all duration-200 font-medium text-sm;
+  }
+  
+  .btn-secondary {
+    @apply bg-white border border-neutral-200 hover:border-primary-300 hover:text-primary-500 text-neutral-500 px-4 py-2 rounded-lg transition-all duration-200 font-medium text-sm;
+  }
+  
+  .btn-danger {
+    @apply bg-medical-danger hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-all duration-200 font-medium text-sm;
+  }
+  
+  .card {
+    @apply bg-white rounded-xl shadow-card p-5 transition-all duration-200;
+  }
+  
+  .card-hover:hover {
+    @apply shadow-card-hover -translate-y-0.5;
+  }
+  
+  .input-field {
+    @apply w-full px-3 py-2 border border-neutral-200 rounded-lg focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-50 transition-all text-sm;
+  }
+  
+  .tag {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .tag-success {
+    @apply bg-green-50 text-medical-success;
+  }
+  
+  .tag-warning {
+    @apply bg-orange-50 text-medical-warning;
+  }
+  
+  .tag-danger {
+    @apply bg-red-50 text-medical-danger;
+  }
+  
+  .tag-info {
+    @apply bg-primary-50 text-primary-500;
+  }
+  
+  .tag-neutral {
+    @apply bg-neutral-100 text-neutral-400;
+  }
+  
+  .page-title {
+    @apply text-xl font-semibold text-neutral-500 mb-1;
+  }
+  
+  .page-subtitle {
+    @apply text-sm text-neutral-300 mb-6;
+  }
+  
+  .section-title {
+    @apply text-base font-semibold text-neutral-500 mb-4;
+  }
+}
+
+/* Animation for page transitions */
+.page-enter {
+  animation: fadeIn 0.3s ease-out, slideUp 0.4s ease-out;
+}
