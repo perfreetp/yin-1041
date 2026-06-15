@@ -31,7 +31,7 @@ const appointmentStatusMap: Record<AppointmentStatus, { label: string; className
 };
 
 const Communication = () => {
-  const { messages, appointments, patients, sendMessage, addAppointment, currentDoctor } = useAppStore();
+  const { messages, appointments, patients, sendMessage, addAppointment, updateAppointmentStatus, currentDoctor } = useAppStore();
   const [activeTab, setActiveTab] = useState<'chat' | 'appointment' | 'notification'>('chat');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
@@ -403,10 +403,18 @@ const Communication = () => {
                     <td className="px-5 py-4 text-center">
                       {apt.status === 'pending' && (
                         <div className="flex items-center justify-center space-x-1.5">
-                          <button className="p-1.5 hover:bg-green-50 rounded-lg text-medical-success">
+                          <button
+                            className="p-1.5 hover:bg-green-50 rounded-lg text-medical-success"
+                            onClick={() => updateAppointmentStatus(apt.id, 'confirmed')}
+                            title="确认预约"
+                          >
                             <CheckCircle className="w-4 h-4" />
                           </button>
-                          <button className="p-1.5 hover:bg-red-50 rounded-lg text-medical-danger">
+                          <button
+                            className="p-1.5 hover:bg-red-50 rounded-lg text-medical-danger"
+                            onClick={() => updateAppointmentStatus(apt.id, 'cancelled')}
+                            title="取消预约"
+                          >
                             <XCircle className="w-4 h-4" />
                           </button>
                         </div>

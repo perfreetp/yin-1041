@@ -40,7 +40,7 @@ import {
 import { useAppStore } from '@/store';
 
 const Statistics = () => {
-  const { patients, assessments, progressData, trendData, groups, checkins, currentDoctor } = useAppStore();
+  const { patients, assessments, progressData, trendData, groups, checkins, appointments, prescriptions, currentDoctor } = useAppStore();
   const [selectedPatient, setSelectedPatient] = useState('all');
   const [dateRange, setDateRange] = useState('30');
 
@@ -88,6 +88,128 @@ const Statistics = () => {
     { day: '周六', 打卡数: 22, 异常数: 4 },
     { day: '周日', 打卡数: 18, 异常数: 2 },
   ];
+
+  const generateReport = (type: 'individual' | 'monthly' | 'stage') => {
+    const now = new Date().toLocaleString('zh-CN', { hour12: false });
+    const separator = '='.repeat(60);
+    const divider = '-'.repeat(60);
+    let content = '';
+
+    if (type === 'individual') {
+      content = `患者个人康复报告\n生成时间: ${now}\n生成医生: ${currentDoctor.name}\n${separator}\n\n`;
+      patients.filter((p) => p.status === 'active').forEach((patient) => {
+        content += `【患者基本信息】\n`;
+        content += `  姓名: ${patient.name}\n`;
+        content += `  年龄: ${patient.age}岁  性别: ${patient.gender}\n`;
+        content += `  诊断: ${patient.diagnosis}\n`;
+        content += `  风险等级: ${patient.riskLevel === 'low' ? '低' : patient.riskLevel === 'medium' ? '中' : '高'}\n`;
+        content += `  康复阶段: ${patient.stage}\n`;
+        content += `  连续打卡: ${patient.checkinStreak}天\n`;
+        const pAssessments = assessments.filter((a) => a.patientId === patient.id);
+        if (pAssessments.length > 0) {
+          content += `\n  【评估记录】共${pAssessments.length}次\n`;
+          pAssessments.forEach((a) => {
+            content += `    ${a.date} ${a.typeName}: ${a.totalScore}/${a.maxScore}`;
+            if (a.maxScore > 0) content += ` (${Math.round((a.totalScore / a.maxScore) * 100)}%)`;
+            content += `\n`;
+            if (a.summary) content += `      总结: ${a.summary}\n`;
+          });
+        }
+        const pCheckins = checkins.filter((c) => c.patientId === patient.id);
+        if (pCheckins.length > 0) {
+          content += `\n  【打卡记录】共${pCheckins.length}次\n`;
+          pCheckins.forEach((c) => {
+            content += `    ${c.date} ${c.time} - ${c.status === 'approved' ? '已通过' : c.status === 'pending' ? '待审核' : '已驳回'}`;
+            if (c.painLevel !== undefined) content += ` 疼痛:${c.painLevel}`;
+            content += `\n`;
+          });
+        }
+        const pPrescriptions = prescriptions.filter((pr) => pr.patientId === patient.id);
+        if (pPrescriptions.length > 0) {
+          content += `\n  【训练处方】共${pPrescriptions.length}条\n`;
+          pPrescriptions.forEach((pr) => {
+            content += `    ${pr.name} (${pr.startDate}~${pr.endDate}) 状态:${pr.status === 'active' ? '进行中' : pr.status === 'completed' ? '已完成' : '已暂停'}\n`;
+          });
+        }
+        content += `\n${divider}\n\n`;
+      });
+    } else if (type === 'monthly') {
+      content = `科室康复统计月报\n生成时间: ${now}\n科室: ${currentDoctor.department}\n${separator}\n\n`;
+      content += `【总体概况】\n`;
+      content += `  在管患者数: ${patients.filter((p) => p.status === 'active').length}\n`;
+      content += `  已出院患者数: ${patients.filter((p) => p.status === 'discharged').length}\n`;
+      content += `  评估总次数: ${assessments.length}\n`;
+      content += `  打卡总次数: ${checkins.length}\n`;
+      content += `  处方总数: ${prescriptions.length}\n`;
+      content += `  预约总数: ${appointments.length}\n\n`;
+      content += `【分组统计】\n`;
+      groups.forEach((g) => {
+        const cnt = patients.filter((p) => p.groupId === g.id).length;
+        content += `  ${g.name}: ${cnt}人\n`;
+      });
+      content += `\n【诊断分布】\n`;
+      const diagMap: Record<string, number> = {};
+      patients.forEach((p) => { diagMap[p.diagnosis] = (diagMap[p.diagnosis] || 0) + 1; });
+      Object.entries(diagMap).forEach(([d, c]) => { content += `  ${d}: ${c}人\n`; });
+      content += `\n【风险分级】\n`;
+      content += `  低风险: ${patients.filter((p) => p.riskLevel === 'low').length}人\n`;
+      content += `  中风险: ${patients.filter((p) => p.riskLevel === 'medium').length}人\n`;
+      content += `  高风险: ${patients.filter((p) => p.riskLevel === 'high').length}人\n\n`;
+      content += `【预约统计】\n`;
+      content += `  待确认: ${appointments.filter((a) => a.status === 'pending').length}\n`;
+      content += `  已确认: ${appointments.filter((a) => a.status === 'confirmed').length}\n`;
+      content += `  已完成: ${appointments.filter((a) => a.status === 'completed').length}\n`;
+      content += `  已取消: ${appointments.filter((a) => a.status === 'cancelled').length}\n\n`;
+      content += `【评估统计】\n`;
+      const typeMap: Record<string, number> = {};
+      assessments.forEach((a) => { typeMap[a.typeName] = (typeMap[a.typeName] || 0) + 1; });
+      Object.entries(typeMap).forEach(([t, c]) => { content += `  ${t}: ${c}次\n`; });
+      if (assessments.length > 0) {
+        const scored = assessments.filter((a) => a.maxScore > 0);
+        if (scored.length > 0) {
+          const avgRecovery = Math.round(scored.reduce((s, a) => s + (a.totalScore / a.maxScore) * 100, 0) / scored.length);
+          content += `  平均恢复度: ${avgRecovery}%\n`;
+        }
+      }
+    } else {
+      const stages = ['早期', '中期', '后期', '维持期'];
+      content = `阶段康复总结报告\n生成时间: ${now}\n生成医生: ${currentDoctor.name}\n${separator}\n\n`;
+      stages.forEach((stage) => {
+        const sp = patients.filter((p) => p.stage === stage);
+        content += `【${stage}康复阶段】\n`;
+        content += `  患者数: ${sp.length}\n`;
+        if (sp.length > 0) {
+          content += `  患者: ${sp.map((p) => p.name).join('、')}\n`;
+          const sa = assessments.filter((a) => sp.some((p) => p.id === a.patientId));
+          if (sa.length > 0) {
+            const scored = sa.filter((a) => a.maxScore > 0);
+            if (scored.length > 0) {
+              const avg = Math.round(scored.reduce((s, a) => s + (a.totalScore / a.maxScore) * 100, 0) / scored.length);
+              content += `  平均恢复度: ${avg}%\n`;
+            }
+            content += `  评估次数: ${sa.length}\n`;
+          }
+          const sc = checkins.filter((c) => sp.some((p) => p.id === c.patientId));
+          content += `  打卡次数: ${sc.length}\n`;
+          const approved = sc.filter((c) => c.status === 'approved').length;
+          if (sc.length > 0) content += `  审核通过率: ${Math.round((approved / sc.length) * 100)}%\n`;
+          const highRisk = sp.filter((p) => p.riskLevel === 'high').length;
+          if (highRisk > 0) content += `  高风险患者: ${highRisk}人\n`;
+        }
+        content += `\n`;
+      });
+    }
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = type === 'individual' ? '患者个人康复报告.txt' : type === 'monthly' ? '科室康复统计月报.txt' : '阶段康复总结报告.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6">
@@ -423,6 +545,7 @@ const Statistics = () => {
               icon: FileText,
               color: 'from-primary-500 to-primary-700',
               format: 'PDF',
+              type: 'individual' as const,
             },
             {
               title: '科室康复统计月报',
@@ -430,6 +553,7 @@ const Statistics = () => {
               icon: BarChart3,
               color: 'from-medical-teal to-medical-tealLight',
               format: 'PDF / Excel',
+              type: 'monthly' as const,
             },
             {
               title: '阶段康复总结报告',
@@ -437,6 +561,7 @@ const Statistics = () => {
               icon: Calendar,
               color: 'from-purple-500 to-purple-700',
               format: 'PDF',
+              type: 'stage' as const,
             },
           ].map((report, index) => {
             const Icon = report.icon;
@@ -444,6 +569,7 @@ const Statistics = () => {
               <div
                 key={index}
                 className="border border-neutral-100 rounded-xl p-5 hover:shadow-card-hover transition-all cursor-pointer group"
+                onClick={() => generateReport(report.type)}
               >
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${report.color} flex items-center justify-center text-white mb-4`}>
                   <Icon className="w-6 h-6" />

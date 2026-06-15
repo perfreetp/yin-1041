@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Plus,
   Activity,
@@ -24,7 +24,7 @@ import {
   Legend,
 } from 'recharts';
 import { useAppStore } from '@/store';
-import type { Assessment, AssessmentType } from '@/types';
+import type { Assessment, AssessmentType, RomRecord } from '@/types';
 
 const assessmentTypeInfo: Record<AssessmentType, { name: string; desc: string; icon: any; color: string }> = {
   fugl_meyer: {
@@ -60,7 +60,7 @@ const assessmentTypeInfo: Record<AssessmentType, { name: string; desc: string; i
 };
 
 const Assessments = () => {
-  const { assessments, patients } = useAppStore();
+  const { assessments, patients, addAssessment } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -69,6 +69,68 @@ const Assessments = () => {
   const [newPatientId, setNewPatientId] = useState('');
   const [assessmentScores, setAssessmentScores] = useState<Record<string, number>>({});
   const [summary, setSummary] = useState('');
+  const [romFormData, setRomFormData] = useState<Record<string, { active: string; passive: string }>>({});
+  const [manualScore, setManualScore] = useState('');
+  const [manualMaxScore, setManualMaxScore] = useState('');
+
+  const handleSaveAssessment = () => {
+    if (!newPatientId) return;
+    const patient = patients.find((p) => p.id === newPatientId);
+    if (!patient) return;
+
+    const typeInfo = assessmentTypeInfo[newAssessmentType];
+    const scores: Record<string, number> = {};
+    let totalScore = 0;
+    let maxScore = 0;
+    let romData: RomRecord[] | undefined;
+
+    if (newAssessmentType === 'fugl_meyer') {
+      scaleItems.forEach((item) => {
+        const score = assessmentScores[item.id] || 0;
+        scores[item.name] = score;
+        totalScore += score;
+        maxScore += item.maxScore;
+      });
+    } else if (newAssessmentType === 'rom') {
+      romData = romJoints.map((joint, index) => ({
+        joint: joint.joint,
+        side: '右' as const,
+        activeRange: parseInt(romFormData[index]?.active || '0'),
+        passiveRange: parseInt(romFormData[index]?.passive || '0'),
+        normalRange: joint.normal,
+        unit: '°',
+      }));
+    } else if (newAssessmentType === 'berg') {
+      totalScore = parseInt(manualScore) || 0;
+      maxScore = parseInt(manualMaxScore) || 56;
+      scores['平衡功能'] = totalScore;
+    } else if (newAssessmentType === 'barthel') {
+      totalScore = parseInt(manualScore) || 0;
+      maxScore = parseInt(manualMaxScore) || 100;
+      scores['日常生活能力'] = totalScore;
+    }
+
+    addAssessment({
+      patientId: newPatientId,
+      patientName: patient.name,
+      type: newAssessmentType,
+      typeName: typeInfo.name,
+      date: new Date().toISOString().split('T')[0],
+      scores,
+      totalScore,
+      maxScore,
+      romData,
+      summary: summary || '暂无总结',
+    });
+
+    setShowCreateModal(false);
+    setNewPatientId('');
+    setAssessmentScores({});
+    setSummary('');
+    setRomFormData({});
+    setManualScore('');
+    setManualMaxScore('');
+  };
 
   const filteredAssessments = assessments.filter((a) => {
     const matchSearch = a.patientName.includes(searchQuery);
@@ -438,6 +500,13 @@ const Assessments = () => {
                             <input
                               type="number"
                               placeholder="0"
+                              value={romFormData[index]?.active || ''}
+                              onChange={(e) =>
+                                setRomFormData({
+                                  ...romFormData,
+                                  [index]: { ...romFormData[index], active: e.target.value, passive: romFormData[index]?.passive || '' },
+                                })
+                              }
                               className="input-field !py-1.5 flex-1"
                             />
                             <span className="text-xs text-neutral-300 ml-1">°</span>
@@ -447,6 +516,13 @@ const Assessments = () => {
                             <input
                               type="number"
                               placeholder="0"
+                              value={romFormData[index]?.passive || ''}
+                              onChange={(e) =>
+                                setRomFormData({
+                                  ...romFormData,
+                                  [index]: { ...romFormData[index], passive: e.target.value, active: romFormData[index]?.active || '' },
+                                })
+                              }
                               className="input-field !py-1.5 flex-1"
                             />
                             <span className="text-xs text-neutral-300 ml-1">°</span>
@@ -460,11 +536,25 @@ const Assessments = () => {
 
               {(newAssessmentType === 'berg' || newAssessmentType === 'barthel') && (
                 <div className="mb-6">
-                  <div className="bg-primary-50 rounded-xl p-4 text-center">
-                    <FileText className="w-8 h-8 text-primary-500 mx-auto mb-2" />
-                    <p className="text-sm text-neutral-500">
-                      {assessmentTypeInfo[newAssessmentType].name}问卷将在正式环境中提供完整量表题目
-                    </p>
+                  <h3 className="section-title">{assessmentTypeInfo[newAssessmentType].name}</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-neutral-50 rounded-xl">
+                      <div>
+                        <p className="text-sm font-medium text-neutral-500">评估总分</p>
+                        <p className="text-xs text-neutral-300">
+                          满分 {newAssessmentType === 'berg' ? '56' : '100'} 分
+                        </p>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={newAssessmentType === 'berg' ? 56 : 100}
+                        value={manualScore}
+                        onChange={(e) => setManualScore(e.target.value)}
+                        className="input-field !w-24 text-center"
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -484,7 +574,7 @@ const Assessments = () => {
               <button className="btn-secondary" onClick={() => setShowCreateModal(false)}>
                 取消
               </button>
-              <button className="btn-primary" onClick={() => setShowCreateModal(false)}>
+              <button className="btn-primary" onClick={handleSaveAssessment} disabled={!newPatientId}>
                 <Save className="w-4 h-4 mr-1.5 inline" />
                 保存评估
               </button>

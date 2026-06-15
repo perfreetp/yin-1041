@@ -5,7 +5,6 @@ import {
   Play,
   Clock,
   Target,
-  Gauge,
   ChevronRight,
   X,
   User,
@@ -14,6 +13,7 @@ import {
   Save,
   AlertCircle,
   Info,
+  Upload,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import type { Exercise, Difficulty, PrescriptionExercise } from '@/types';
@@ -67,10 +67,11 @@ const ExerciseCard = ({
 );
 
 const Prescriptions = () => {
-  const { exercises, prescriptions, patients } = useAppStore();
+  const { exercises, prescriptions, patients, addPrescription, addExercise } = useAppStore();
   const [activeTab, setActiveTab] = useState<'library' | 'prescriptions'>('library');
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [selectedExercises, setSelectedExercises] = useState<PrescriptionExercise[]>([]);
   const [selectedPatient, setSelectedPatient] = useState('');
   const [prescriptionName, setPrescriptionName] = useState('');
@@ -80,6 +81,15 @@ const Prescriptions = () => {
   const [painSurveyEnabled, setPainSurveyEnabled] = useState(true);
   const [painSurveyType, setPainSurveyType] = useState<'NRS' | 'VAS'>('NRS');
   const [targetAreaFilter, setTargetAreaFilter] = useState('all');
+
+  const [exName, setExName] = useState('');
+  const [exDescription, setExDescription] = useState('');
+  const [exTargetArea, setExTargetArea] = useState('');
+  const [exDifficulty, setExDifficulty] = useState<Difficulty>('easy');
+  const [exSets, setExSets] = useState(3);
+  const [exReps, setExReps] = useState(10);
+  const [exDuration, setExDuration] = useState('10分钟');
+  const [exTips, setExTips] = useState('');
 
   const targetAreas = Array.from(new Set(exercises.map((e) => e.targetArea.split('、')[0])));
 
@@ -118,6 +128,57 @@ const Prescriptions = () => {
         e.exerciseId === id ? { ...e, [field]: value } : e
       )
     );
+  };
+
+  const handleSavePrescription = () => {
+    if (!prescriptionName || !selectedPatient || !startDate || !endDate || selectedExercises.length === 0) return;
+    const patient = patients.find((p) => p.id === selectedPatient);
+    addPrescription({
+      patientId: selectedPatient,
+      patientName: patient?.name || '',
+      name: prescriptionName,
+      exercises: selectedExercises.map((ex, i) => ({ ...ex, order: i + 1 })),
+      startDate,
+      endDate,
+      frequency,
+      painSurveyConfig: painSurveyEnabled
+        ? { enabled: true, type: painSurveyType, frequency: 'every_checkin' }
+        : undefined,
+      status: 'active',
+    });
+    setShowCreateModal(false);
+    setPrescriptionName('');
+    setSelectedPatient('');
+    setStartDate('');
+    setEndDate('');
+    setFrequency('每日2次，早晚各一次');
+    setPainSurveyEnabled(true);
+    setPainSurveyType('NRS');
+    setSelectedExercises([]);
+    setActiveTab('prescriptions');
+  };
+
+  const handleSaveExercise = () => {
+    if (!exName || !exDescription || !exTargetArea) return;
+    addExercise({
+      name: exName,
+      description: exDescription,
+      targetArea: exTargetArea,
+      difficulty: exDifficulty,
+      defaultSets: exSets,
+      defaultReps: exReps,
+      duration: exDuration,
+      tips: exTips ? exTips.split('\n').filter(Boolean) : [],
+    });
+    setShowExerciseModal(false);
+    setExName('');
+    setExDescription('');
+    setExTargetArea('');
+    setExDifficulty('easy');
+    setExSets(3);
+    setExReps(10);
+    setExDuration('10分钟');
+    setExTips('');
   };
 
   const activePrescriptions = prescriptions.filter((p) => p.status === 'active');
@@ -189,15 +250,9 @@ const Prescriptions = () => {
                   </option>
                 ))}
               </select>
-              <select className="h-9 px-3 bg-white border border-neutral-200 rounded-lg text-sm focus:outline-none focus:border-primary-500">
-                <option>全部难度</option>
-                <option value="easy">简单</option>
-                <option value="medium">中等</option>
-                <option value="hard">困难</option>
-              </select>
             </div>
-            <button className="btn-secondary">
-              <Plus className="w-4 h-4 mr-1.5 inline" />
+            <button className="btn-secondary" onClick={() => setShowExerciseModal(true)}>
+              <Upload className="w-4 h-4 mr-1.5 inline" />
               上传新动作
             </button>
           </div>
@@ -456,13 +511,13 @@ const Prescriptions = () => {
                   <div className="text-center py-8 bg-neutral-50 rounded-xl mb-4">
                     <Info className="w-8 h-8 text-neutral-200 mx-auto" />
                     <p className="text-sm text-neutral-300 mt-2">
-                      请先从上方动作库中选择康复动作
+                      请先从动作库中选择康复动作
                     </p>
                   </div>
                 )}
 
                 <div className="grid grid-cols-4 gap-3">
-                  {exercises.slice(0, 4).map((exercise) => (
+                  {exercises.map((exercise) => (
                     <div
                       key={exercise.id}
                       className={`p-3 rounded-xl border cursor-pointer transition-all ${
@@ -536,9 +591,130 @@ const Prescriptions = () => {
               >
                 取消
               </button>
-              <button className="btn-primary" onClick={() => setShowCreateModal(false)}>
+              <button
+                className="btn-primary"
+                disabled={!prescriptionName || !selectedPatient || !startDate || !endDate || selectedExercises.length === 0}
+                onClick={handleSavePrescription}
+              >
                 <Save className="w-4 h-4 mr-1.5 inline" />
                 保存处方
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExerciseModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl w-[600px] max-h-[90vh] overflow-hidden flex flex-col animate-slide-down">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100">
+              <h2 className="text-lg font-semibold text-neutral-500">新增康复动作</h2>
+              <button
+                className="p-1.5 hover:bg-neutral-100 rounded-lg"
+                onClick={() => setShowExerciseModal(false)}
+              >
+                <X className="w-5 h-5 text-neutral-400" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-neutral-500 mb-1.5">动作名称</label>
+                <input
+                  type="text"
+                  value={exName}
+                  onChange={(e) => setExName(e.target.value)}
+                  placeholder="如：直腿抬高训练"
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-neutral-500 mb-1.5">动作描述</label>
+                <textarea
+                  value={exDescription}
+                  onChange={(e) => setExDescription(e.target.value)}
+                  placeholder="详细描述动作要领和执行方式..."
+                  className="input-field h-20 resize-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-1.5">目标部位</label>
+                  <input
+                    type="text"
+                    value={exTargetArea}
+                    onChange={(e) => setExTargetArea(e.target.value)}
+                    placeholder="如：大腿肌群、髋屈肌"
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-1.5">难度等级</label>
+                  <select
+                    value={exDifficulty}
+                    onChange={(e) => setExDifficulty(e.target.value as Difficulty)}
+                    className="input-field"
+                  >
+                    <option value="easy">简单</option>
+                    <option value="medium">中等</option>
+                    <option value="hard">困难</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-1.5">默认组数</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={exSets}
+                    onChange={(e) => setExSets(parseInt(e.target.value) || 1)}
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-1.5">默认次数</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={exReps}
+                    onChange={(e) => setExReps(parseInt(e.target.value) || 1)}
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-500 mb-1.5">建议时长</label>
+                  <input
+                    type="text"
+                    value={exDuration}
+                    onChange={(e) => setExDuration(e.target.value)}
+                    placeholder="如：10-15分钟"
+                    className="input-field"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-neutral-500 mb-1.5">
+                  动作要点（每行一条）
+                </label>
+                <textarea
+                  value={exTips}
+                  onChange={(e) => setExTips(e.target.value)}
+                  placeholder="保持腰部贴紧床面&#10;动作缓慢有控制&#10;避免腰部代偿"
+                  className="input-field h-24 resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3 px-6 py-4 border-t border-neutral-100">
+              <button className="btn-secondary" onClick={() => setShowExerciseModal(false)}>
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                disabled={!exName || !exDescription || !exTargetArea}
+                onClick={handleSaveExercise}
+              >
+                <Save className="w-4 h-4 mr-1.5 inline" />
+                保存动作
               </button>
             </div>
           </div>

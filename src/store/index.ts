@@ -13,6 +13,7 @@ import type {
   TrendDataPoint,
   ProgressDataPoint,
   CheckinStatus,
+  AppointmentStatus,
 } from '@/types';
 import {
   mockDoctor,
@@ -51,6 +52,10 @@ interface AppState {
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   addAppointment: (appointment: Omit<Appointment, 'id' | 'createdAt'>) => void;
+  updateAppointmentStatus: (appointmentId: string, status: AppointmentStatus) => void;
+  addPrescription: (prescription: Omit<Prescription, 'id' | 'createdAt' | 'doctorName'>) => void;
+  addAssessment: (assessment: Omit<Assessment, 'id' | 'doctorName'>) => void;
+  addExercise: (exercise: Omit<Exercise, 'id'>) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -128,5 +133,44 @@ export const useAppStore = create<AppState>((set, get) => ({
       createdAt: new Date().toISOString().split('T')[0],
     };
     set({ appointments: [...state.appointments, newAppointment] });
+  },
+
+  updateAppointmentStatus: (appointmentId, status) => {
+    const state = get();
+    set({
+      appointments: state.appointments.map((a) =>
+        a.id === appointmentId ? { ...a, status } : a
+      ),
+    });
+  },
+
+  addPrescription: (prescription) => {
+    const state = get();
+    const newPrescription: Prescription = {
+      ...prescription,
+      id: `pres-${Date.now()}`,
+      createdAt: new Date().toISOString().split('T')[0],
+      doctorName: state.currentDoctor.name,
+    };
+    set({ prescriptions: [newPrescription, ...state.prescriptions] });
+  },
+
+  addAssessment: (assessment) => {
+    const state = get();
+    const newAssessment: Assessment = {
+      ...assessment,
+      id: `as-${Date.now()}`,
+      doctorName: state.currentDoctor.name,
+    };
+    set({ assessments: [newAssessment, ...state.assessments] });
+  },
+
+  addExercise: (exercise) => {
+    const state = get();
+    const newExercise: Exercise = {
+      ...exercise,
+      id: `ex-${Date.now()}`,
+    };
+    set({ exercises: [...state.exercises, newExercise] });
   },
 }));
